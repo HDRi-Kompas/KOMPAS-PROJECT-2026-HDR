@@ -83,12 +83,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         {/* Foreground Content */}
         <div className="relative z-10 max-w-2xl sm:max-w-3xl">
-          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight mb-3">
+          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white tracking-tight mb-6">
             Audit Kualitas Metadata &amp; Data Spasial Kelautan
           </h1>
-          <p className="text-slate-300 text-sm sm:text-base leading-relaxed mb-6">
-            KOMPAS mengaudit kesesuaian standar internasional <strong className="text-cyan-300 font-semibold">ISO 19115-1:2014</strong> dan standar nasional <strong className="text-emerald-300 font-semibold">SNI ISO 19115:2012 (BSN/BIG)</strong> serta menghitung indeks mutu kuantitatif <strong className="text-white font-semibold">Metadata Quality Index (MQI)</strong> dengan transparansi penuh formula matematis dan tanpa simulasi rekaan.
-          </p>
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={onNavigateUpload}

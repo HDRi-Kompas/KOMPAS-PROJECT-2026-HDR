@@ -1,0 +1,5 @@
+{
+  "summary":  "Dokumentasi teknis arsitektur perangkat lunak KOMPAS v7. Menjelaskan struktur kode, modul parser hirarkis (GMD, MDB, ESRI, CKAN), konfigurasi dinamis JSON tanpa hardcoding, arsitektur penyimpanan luring di browser, dan petunjuk ekspor multi-format.",
+  "updatedAt":  "2026-11-01T13:35:01.997446661Z",
+  "userFacing":  true
+}
