@@ -1,0 +1,8 @@
+{
+  "name": "KOMPAS - Marine Metadata Quality Index Audit Platform",
+  "description": "Platform audit kualitas metadata dan dataset geospasial kelautan berbasis standar ISO 19115 (SNI ISO 19115) dan Metadata Quality Index (MQI) Hasara & Karunanayaka (2026).",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
