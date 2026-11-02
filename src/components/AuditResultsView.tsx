@@ -57,6 +57,8 @@ import { OpenStreetMapViewer } from './OpenStreetMapViewer';
 import { AuditComparisonBarChart } from './AuditComparisonBarChart';
 import { ManualReviewPanel } from './ManualReviewPanel';
 import { BenchmarkExplorerModal } from './BenchmarkExplorerModal';
+import { RecommendationsPanel } from './RecommendationsPanel';
+import { generateActionableRecommendations, calculateScoreProjection } from '../audit/recommendations';
 import { resolveSpatialFromReport } from '../utils/spatialHelper';
 
 interface AuditResultsViewProps {
@@ -73,7 +75,7 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
 
   const [selectedResult, setSelectedResult] = useState<ParameterAuditResult | null>(null);
   const [activeTab, setActiveTab] = useState<
-    'v7elements' | 'manualReview' | 'emptyElements' | 'warnings' | 'benchmarks' | 'categories' | 'config' | 'map'
+    'v7elements' | 'recommendations' | 'manualReview' | 'emptyElements' | 'warnings' | 'benchmarks' | 'categories' | 'config' | 'map'
   >('v7elements');
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -450,6 +452,8 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
   };
 
   const triggeredFlags = (report.qualityFlags || []).filter(f => f.isTriggered);
+  const recommendations = generateActionableRecommendations(report, elements, elementScores, triggeredFlags);
+  const scoreProjection = calculateScoreProjection(activeV7, elements, elementScores);
 
   // Filter elements for the 32 elements table
   const filteredElements = elements.filter(el => {
@@ -674,6 +678,14 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
             <Edit3 className="w-4 h-4" />
             <span>Manual Override: <strong>{Object.keys(manualOverrides).length}</strong></span>
           </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('recommendations')}
+            className="flex items-center gap-1.5 text-cyan-300 hover:text-cyan-200 transition-colors bg-cyan-950/60 hover:bg-cyan-900/60 px-2.5 py-1 rounded-lg border border-cyan-800"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Rekomendasi: <strong>{recommendations.length} Panduan</strong></span>
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -703,6 +715,18 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
         >
           <Layers className="w-4 h-4" />
           <span>32 Elemen Metadata (E01–E32)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('recommendations')}
+          className={`py-3 px-4 text-xs font-bold transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${
+            activeTab === 'recommendations'
+              ? 'border-cyan-400 text-cyan-300'
+              : 'border-transparent text-slate-400 hover:text-white'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-cyan-400" />
+          <span>Rekomendasi Perbaikan ({recommendations.length})</span>
         </button>
 
         <button
@@ -950,6 +974,15 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
         </div>
       )}
 
+      {/* Tab: Rekomendasi Perbaikan & Score Projection */}
+      {activeTab === 'recommendations' && (
+        <RecommendationsPanel
+          recommendations={recommendations}
+          projection={scoreProjection}
+          datasetName={activeDatasetTitle}
+        />
+      )}
+
       {/* Tab 2: Manual Review Panel */}
       {activeTab === 'manualReview' && (
         <ManualReviewPanel
@@ -964,7 +997,7 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
       {/* Tab 3: Empty Elements List sorted by weight impact */}
       {activeTab === 'emptyElements' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 lg:p-8 space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <XCircle className="w-5 h-5 text-rose-400" />
@@ -974,9 +1007,19 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                 Sesuai handover final: Elemen berbobot 3 (kritis) diprioritaskan terlebih dahulu, diikuti bobot 2, lalu bobot 1.
               </p>
             </div>
-            <span className="px-3 py-1 rounded-xl bg-rose-950/80 border border-rose-800 text-rose-300 font-mono font-bold text-xs">
-              {activeV7.emptyElements.length} Elemen Perlu Dilengkapi
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab('recommendations')}
+                className="px-3.5 py-1.5 text-xs font-bold text-slate-900 bg-cyan-400 hover:bg-cyan-300 rounded-xl transition-colors shadow flex items-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Buka Panduan Rekomendasi &amp; Snippet</span>
+              </button>
+              <span className="px-3 py-1.5 rounded-xl bg-rose-950/80 border border-rose-800 text-rose-300 font-mono font-bold text-xs">
+                {activeV7.emptyElements.length} Elemen
+              </span>
+            </div>
           </div>
 
           {activeV7.emptyElements.length === 0 ? (
