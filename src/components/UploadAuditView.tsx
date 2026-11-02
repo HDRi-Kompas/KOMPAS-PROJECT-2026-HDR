@@ -46,12 +46,14 @@ import { InventoryStorageEngine } from '../storage/inventoryStore';
 import { parseXmlMetadata } from '../parsers/xmlParser';
 import { parseJsonMetadata } from '../parsers/jsonParser';
 import { parseGeoJson } from '../parsers/geoJsonParser';
+import { detectDetailedFormat, MetadataFormatInfo } from '../utils/formatDetector';
 
 interface UploadQueueItem {
   id: string;
   file: File;
   name: string;
   format: string;
+  formatInfo?: MetadataFormatInfo;
   sizeBytes: number;
   checksum: string;
   detectedProfile: DatasetProfileId;
@@ -76,6 +78,7 @@ interface SingleSummaryData {
   abstract?: string;
   fileName: string;
   format: string;
+  formatInfo: MetadataFormatInfo;
   sizeBytes: number;
   checksum: string;
   citationDate?: string;
@@ -154,76 +157,52 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
   // Detect format & heuristic profile
   const detectFileAttributes = async (file: File): Promise<{
     format: string;
+    formatInfo: MetadataFormatInfo;
     profile: DatasetProfileId;
     isValid: boolean;
     error?: string;
   }> => {
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    let format = 'Unknown';
-    let profile: DatasetProfileId = 'kelautan_umum';
+    let text = '';
     let isValid = true;
     let error: string | undefined;
 
-    if (ext === 'xml') {
+    if (ext === 'xml' || ext === 'json' || ext === 'geojson') {
       try {
-        const text = await file.text();
-        if (text.includes('mdb:MD_Metadata') || text.includes('xmlns:mdb')) {
-          format = 'XML (ISO 19115-3:2021 / mdb)';
-        } else if (text.includes('gmd:MD_Metadata') || text.includes('MD_Metadata')) {
-          format = 'XML (ISO 19139 / gmd)';
-        } else if (text.includes('<idinfo>') || text.includes('<metadata')) {
-          format = 'XML (Esri/ArcGIS)';
-        } else {
-          format = 'XML Metadata';
-        }
+        text = await file.text();
+      } catch (err: any) {
+        isValid = false;
+        error = `Gagal membaca berkas ${file.name}: ${err?.message}`;
+      }
+    }
 
-        const lower = text.toLowerCase();
-        if (lower.includes('batimetri') || lower.includes('bathymetry') || lower.includes('echosounder')) {
-          profile = 'batimetri';
-        } else if (lower.includes('karang') || lower.includes('coral') || lower.includes('terumbu')) {
-          profile = 'terumbu_karang';
-        } else if (lower.includes('mangrove') || lower.includes('bakau')) {
-          profile = 'mangrove';
-        } else if (lower.includes('konservasi') || lower.includes('kkp3k') || lower.includes('taman nasional')) {
-          profile = 'kawasan_konservasi';
-        } else if (lower.includes('migrasi') || lower.includes('penyu') || lower.includes('dugong') || lower.includes('paus')) {
-          profile = 'jalur_migrasi';
-        } else if (lower.includes('bentik') || lower.includes('benthic') || lower.includes('lamun')) {
-          profile = 'habitat_bentik';
-        }
-      } catch (err: any) {
-        isValid = false;
-        error = `Gagal membaca berkas XML: ${err?.message}`;
+    const formatInfo = detectDetailedFormat(file.name, text);
+    const format = formatInfo.badgeText;
+    let profile: DatasetProfileId = 'kelautan_umum';
+
+    if (text) {
+      const lower = text.toLowerCase();
+      if (lower.includes('batimetri') || lower.includes('bathymetry') || lower.includes('echosounder')) {
+        profile = 'batimetri';
+      } else if (lower.includes('karang') || lower.includes('coral') || lower.includes('terumbu')) {
+        profile = 'terumbu_karang';
+      } else if (lower.includes('mangrove') || lower.includes('bakau')) {
+        profile = 'mangrove';
+      } else if (lower.includes('konservasi') || lower.includes('kkp3k') || lower.includes('taman nasional')) {
+        profile = 'kawasan_konservasi';
+      } else if (lower.includes('migrasi') || lower.includes('penyu') || lower.includes('dugong') || lower.includes('paus')) {
+        profile = 'jalur_migrasi';
+      } else if (lower.includes('bentik') || lower.includes('benthic') || lower.includes('lamun')) {
+        profile = 'habitat_bentik';
       }
-    } else if (ext === 'json') {
-      try {
-        const text = await file.text();
-        const parsed = JSON.parse(text);
-        if (parsed.type === 'FeatureCollection' || parsed.type === 'Feature') {
-          format = 'GeoJSON Spasial';
-          profile = 'kelautan_umum';
-        } else {
-          format = 'JSON Katalog Metadata';
-          const lower = text.toLowerCase();
-          if (lower.includes('konservasi') || lower.includes('kkp3k')) profile = 'kawasan_konservasi';
-          else if (lower.includes('batimetri')) profile = 'batimetri';
-        }
-      } catch (err: any) {
-        isValid = false;
-        error = `Sintaks JSON tidak valid: ${err?.message}`;
-      }
-    } else if (ext === 'geojson') {
-      format = 'GeoJSON Spasial';
-      profile = 'kelautan_umum';
-    } else if (ext === 'zip') {
-      format = 'Shapefile ZIP';
-      profile = 'kelautan_umum';
-    } else {
+    }
+
+    if (ext !== 'xml' && ext !== 'json' && ext !== 'geojson' && ext !== 'zip') {
       isValid = false;
       error = `Format berkas .${ext} tidak didukung. Harap gunakan berkas XML (ISO/Esri), JSON Katalog, GeoJSON, atau Shapefile ZIP.`;
     }
 
-    return { format, profile, isValid, error };
+    return { format, formatInfo, profile, isValid, error };
   };
 
   // Add files to batch queue
@@ -244,7 +223,7 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
       try {
         const buffer = await file.arrayBuffer();
         const checksum = await computeChecksum(buffer);
-        const { format, profile, isValid, error } = await detectFileAttributes(file);
+        const { format, formatInfo, profile, isValid, error } = await detectFileAttributes(file);
 
         // Check if checksum already exists in persistent database
         const existingRec = InventoryStorageEngine.getRecordByChecksum(checksum);
@@ -292,6 +271,7 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
           file,
           name: file.name,
           format,
+          formatInfo,
           sizeBytes: file.size,
           checksum,
           detectedProfile: profile,
@@ -336,7 +316,7 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
         const buffer = await targetFile.arrayBuffer();
         const checksum = await computeChecksum(buffer);
         const existingRecord = InventoryStorageEngine.getRecordByChecksum(checksum);
-        const { format, profile } = await detectFileAttributes(targetFile);
+        const { format, formatInfo, profile } = await detectFileAttributes(targetFile);
 
         let title = targetFile.name.replace(/\.[^/.]+$/, '');
         let abstract: string | undefined;
@@ -475,6 +455,7 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
             abstract,
             fileName: targetFile.name,
             format,
+            formatInfo,
             sizeBytes: targetFile.size,
             checksum,
             citationDate,
@@ -513,8 +494,8 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       const ext = file.name.split('.').pop()?.toLowerCase();
-      if (ext !== 'xml' && ext !== 'json') {
-        setValidationError(`Format "${file.name}" tidak didukung sebagai dokumen metadata. Harap gunakan .xml atau .json.`);
+      if (ext !== 'xml' && ext !== 'json' && ext !== 'geojson') {
+        setValidationError(`Format "${file.name}" tidak didukung sebagai dokumen metadata. Harap gunakan .xml (ISO/Esri), .json (Katalog), atau .geojson.`);
         return;
       }
       setValidationError(null);
@@ -541,11 +522,11 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
       const ext = file.name.split('.').pop()?.toLowerCase();
-      if (ext === 'xml' || ext === 'json') {
+      if (ext === 'xml' || ext === 'json' || ext === 'geojson') {
         setValidationError(null);
         setMetadataFile(file);
       } else {
-        setValidationError(`Berkas "${file.name}" bukan berkas XML/JSON metadata.`);
+        setValidationError(`Berkas "${file.name}" bukan berkas XML/JSON/GeoJSON metadata.`);
       }
     }
   };
@@ -700,6 +681,41 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
             </div>
           </div>
 
+          {/* Format Support & Auto-Detection Guide Strip */}
+          <div className="p-3.5 bg-slate-900/90 border border-slate-800 rounded-xl text-xs space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-slate-300 font-semibold flex items-center gap-1.5">
+                <Code2 className="w-4 h-4 text-cyan-400" />
+                <span>Format Metadata Didukung & Diidentifikasi Otomatis:</span>
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Mesin mengenali seketika: XML MDB, XML GMD, GeoJSON, atau JSON Katalog
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pt-0.5 font-mono text-[11px]">
+              <span className="px-2 py-0.5 rounded bg-purple-950/80 border border-purple-800 text-purple-300 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                <strong>XML MDB</strong> (ISO 19115-3:2021)
+              </span>
+              <span className="px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-800 text-cyan-300 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                <strong>XML GMD</strong> (ISO 19139 / SNI)
+              </span>
+              <span className="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800 text-emerald-300 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <strong>GeoJSON</strong> (RFC 7946 Spasial)
+              </span>
+              <span className="px-2 py-0.5 rounded bg-amber-950/80 border border-amber-800 text-amber-300 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                <strong>JSON</strong> (Katalog CKAN / DCAT)
+              </span>
+              <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                <strong>Shapefile</strong> (ZIP .shp/.dbf/.prj)
+              </span>
+            </div>
+          </div>
+
           {/* Step 2: Dropzones */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Metadata File Zone */}
@@ -721,7 +737,7 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
               <input
                 type="file"
                 id="metaInput"
-                accept=".xml,.json"
+                accept=".xml,.json,.geojson"
                 onChange={handleMetadataSelect}
                 className="hidden"
               />
@@ -733,19 +749,36 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
                 {metadataFile ? 'Ganti Dokumen Metadata' : 'Pilih Dokumen Metadata'}
               </label>
               <p className="text-xs text-slate-500 mt-1 max-w-xs">
-                Format didukung: XML ISO 19115-3 (mdb), ISO 19139 (gmd), XML Esri, JSON Katalog
+                Format didukung: XML ISO 19115-3 (mdb), ISO 19139 (gmd), XML Esri, JSON Katalog, GeoJSON
               </p>
 
               {metadataFile && (
                 <div className="mt-4 p-2.5 rounded-lg bg-emerald-950/60 border border-emerald-800 text-xs text-emerald-300 font-mono flex items-center justify-between w-full max-w-xs">
-                  <span className="truncate">{metadataFile.name}</span>
+                  <div className="flex flex-col text-left truncate mr-2">
+                    <span className="truncate font-semibold">{metadataFile.name}</span>
+                    {singleSummary && (
+                      <span className={`text-[10px] font-mono mt-0.5 inline-block font-bold ${
+                        singleSummary.formatInfo.category === 'xml_mdb'
+                          ? 'text-purple-300'
+                          : singleSummary.formatInfo.category === 'xml_gmd'
+                          ? 'text-cyan-300'
+                          : singleSummary.formatInfo.category === 'geojson'
+                          ? 'text-emerald-300'
+                          : singleSummary.formatInfo.category === 'json_catalog'
+                          ? 'text-amber-300'
+                          : 'text-slate-300'
+                      }`}>
+                        {singleSummary.formatInfo.badgeText}
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       setMetadataFile(null);
                     }}
-                    className="text-emerald-400 hover:text-white ml-2"
+                    className="text-emerald-400 hover:text-white shrink-0"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -821,18 +854,18 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
                       </h4>
                       <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/90 border border-emerald-700 text-emerald-300 font-semibold flex items-center gap-1">
                         <Check className="w-3 h-3 text-emerald-400" />
-                        <span>Rantai XML XPath Tervalidasi</span>
+                        <span>Rantai XML XPath / Struktur Terurai Otentik</span>
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Parser berhasil menelusuri hierarki pohon elemen ketat (<code className="text-cyan-300 font-mono">getByPath</code>) tanpa pencocokan longgar pertama, membedakan namespace URI, dan mengekstrak 7 elemen inti secara otentik.
+                      Parser berhasil menelusuri hierarki pohon elemen spesifik tanpa fabrikasi default sintetis, membedakan namespace URI, dan mengekstrak elemen secara otentik.
                     </p>
                   </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-slate-950 border border-slate-800 text-slate-300">
-                    {singleSummary.format} · {(singleSummary.sizeBytes / 1024).toFixed(1)} KB
+                    {(singleSummary.sizeBytes / 1024).toFixed(1)} KB · Checksum {singleSummary.checksum.substring(0, 8)}...
                   </span>
                   {singleSummary.isDuplicate ? (
                     <span className="text-[10px] font-mono px-2.5 py-1 rounded bg-amber-950/90 border border-amber-800 text-amber-300 font-semibold flex items-center gap-1.5">
@@ -845,6 +878,106 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
                       <span>Berkas Baru (Siap Inventaris)</span>
                     </span>
                   )}
+                </div>
+              </div>
+
+              {/* CARD UTAMA: IDENTIFIKASI FORMAT METADATA SECARA INSTAN */}
+              <div className={`p-4 rounded-xl border transition-all shadow-md ${
+                singleSummary.formatInfo.category === 'xml_mdb'
+                  ? 'bg-purple-950/40 border-purple-500/70 text-purple-200'
+                  : singleSummary.formatInfo.category === 'xml_gmd'
+                  ? 'bg-cyan-950/40 border-cyan-500/70 text-cyan-200'
+                  : singleSummary.formatInfo.category === 'geojson'
+                  ? 'bg-emerald-950/40 border-emerald-500/70 text-emerald-200'
+                  : singleSummary.formatInfo.category === 'json_catalog'
+                  ? 'bg-amber-950/40 border-amber-500/70 text-amber-200'
+                  : 'bg-slate-950 border-slate-750 text-slate-200'
+              }`}>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-white/10">
+                  <div className="flex items-start gap-3">
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
+                      singleSummary.formatInfo.category === 'xml_mdb'
+                        ? 'bg-purple-900/90 text-purple-200 border border-purple-500'
+                        : singleSummary.formatInfo.category === 'xml_gmd'
+                        ? 'bg-cyan-900/90 text-cyan-200 border border-cyan-500'
+                        : singleSummary.formatInfo.category === 'geojson'
+                        ? 'bg-emerald-900/90 text-emerald-200 border border-emerald-500'
+                        : singleSummary.formatInfo.category === 'json_catalog'
+                        ? 'bg-amber-900/90 text-amber-200 border border-amber-500'
+                        : 'bg-slate-800 text-slate-200 border border-slate-700'
+                    }`}>
+                      {singleSummary.formatInfo.category === 'xml_mdb' ? 'MDB' :
+                       singleSummary.formatInfo.category === 'xml_gmd' ? 'GMD' :
+                       singleSummary.formatInfo.category === 'geojson' ? 'GEO' :
+                       singleSummary.formatInfo.category === 'json_catalog' ? 'JSON' : 'DOC'}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] font-mono uppercase tracking-wider text-slate-400 font-semibold">
+                          Format Teridentifikasi:
+                        </span>
+                        <span className="text-sm font-bold text-white tracking-wide">
+                          {singleSummary.formatInfo.label}
+                        </span>
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                          singleSummary.formatInfo.category === 'xml_mdb'
+                            ? 'bg-purple-950 border-purple-500 text-purple-300'
+                            : singleSummary.formatInfo.category === 'xml_gmd'
+                            ? 'bg-cyan-950 border-cyan-500 text-cyan-300'
+                            : singleSummary.formatInfo.category === 'geojson'
+                            ? 'bg-emerald-950 border-emerald-500 text-emerald-300'
+                            : singleSummary.formatInfo.category === 'json_catalog'
+                            ? 'bg-amber-950 border-amber-500 text-amber-300'
+                            : 'bg-slate-900 border-slate-700 text-slate-300'
+                        }`}>
+                          {singleSummary.formatInfo.badgeText}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                        {singleSummary.formatInfo.description}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 flex items-center gap-2 self-start md:self-center">
+                    <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-black/40 border border-white/10 text-slate-200 flex items-center gap-1.5 font-medium">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Format Valid & Didukung Penuh</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4 Kartu Spesifikasi Rinci Format */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-3 text-xs">
+                  <div className="bg-black/30 p-2.5 rounded-lg border border-white/5">
+                    <span className="text-[10px] font-mono uppercase text-slate-400 block mb-0.5 font-semibold">
+                      Standar Rujukan
+                    </span>
+                    <span className="font-semibold text-white text-xs block leading-snug">
+                      {singleSummary.formatInfo.standard}
+                    </span>
+                  </div>
+                  <div className="bg-black/30 p-2.5 rounded-lg border border-white/5">
+                    <span className="text-[10px] font-mono uppercase text-slate-400 block mb-0.5 font-semibold">
+                      Tag Simpul Akar (Root)
+                    </span>
+                    <code className="font-mono text-cyan-300 text-xs font-bold block">
+                      {singleSummary.formatInfo.rootElement}
+                    </code>
+                    {singleSummary.formatInfo.namespaceUri && (
+                      <span className="text-[10px] text-slate-400 font-mono truncate block mt-0.5" title={singleSummary.formatInfo.namespaceUri}>
+                        {singleSummary.formatInfo.namespaceUri}
+                      </span>
+                    )}
+                  </div>
+                  <div className="bg-black/30 p-2.5 rounded-lg border border-white/5 sm:col-span-2">
+                    <span className="text-[10px] font-mono uppercase text-slate-400 block mb-0.5 font-semibold">
+                      Cakupan Evaluasi Mesin KOMPAS
+                    </span>
+                    <span className="text-xs text-slate-200 leading-relaxed block">
+                      {singleSummary.formatInfo.engineSupport}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -1240,9 +1373,24 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
                           <span className="font-medium text-white text-xs truncate max-w-sm">
                             {item.name}
                           </span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-semibold ${
+                            item.formatInfo?.category === 'xml_mdb'
+                              ? 'bg-purple-950/80 border-purple-800 text-purple-300'
+                              : item.formatInfo?.category === 'xml_gmd'
+                              ? 'bg-cyan-950/80 border-cyan-800 text-cyan-300'
+                              : item.formatInfo?.category === 'geojson'
+                              ? 'bg-emerald-950/80 border-emerald-800 text-emerald-300'
+                              : item.formatInfo?.category === 'json_catalog'
+                              ? 'bg-amber-950/80 border-amber-800 text-amber-300'
+                              : 'bg-slate-800 border-slate-700 text-slate-300'
+                          }`}>
                             {item.format}
                           </span>
+                          {item.formatInfo?.rootElement && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950 text-slate-400 border border-slate-800 hidden md:inline-block">
+                              {item.formatInfo.rootElement}
+                            </span>
+                          )}
                           {item.isDuplicate && (
                             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-800 text-amber-300">
                               Terdaftar ({item.existingInvNumber})

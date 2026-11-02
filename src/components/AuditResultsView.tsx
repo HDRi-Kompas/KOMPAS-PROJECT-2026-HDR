@@ -496,8 +496,18 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
             <span aria-hidden="true">·</span>
             <span className="capitalize">{report.profileId.replace('_', ' ')}</span>
             <span aria-hidden="true">·</span>
-            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-bold uppercase">
-              Format: {activeFormat}
+            <span className={`px-2 py-0.5 rounded border text-xs font-bold ${
+              activeFormat.toLowerCase().includes('mdb') || activeFormat === 'mdb'
+                ? 'bg-purple-950/90 border-purple-600 text-purple-300'
+                : activeFormat.toLowerCase().includes('gmd') || activeFormat === 'gmd'
+                ? 'bg-cyan-950/90 border-cyan-600 text-cyan-300'
+                : activeFormat.toLowerCase().includes('geojson')
+                ? 'bg-emerald-950/90 border-emerald-600 text-emerald-300'
+                : activeFormat.toLowerCase().includes('json') || activeFormat.toLowerCase().includes('ckan')
+                ? 'bg-amber-950/90 border-amber-600 text-amber-300'
+                : 'bg-slate-900 border-slate-800 text-slate-300'
+            }`}>
+              Format: {activeFormat === 'mdb' ? 'XML MDB (ISO 19115-3)' : activeFormat === 'gmd' ? 'XML GMD (ISO 19139)' : activeFormat === 'CKAN' ? 'JSON Katalog (CKAN)' : activeFormat}
             </span>
             <span aria-hidden="true">·</span>
             <span className="px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800 text-cyan-300 font-bold">

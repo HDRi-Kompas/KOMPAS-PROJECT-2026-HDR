@@ -36,12 +36,16 @@ src/
 │   ├── jsonParser.ts       # Parser katalog CKAN package_show & JSON OpenData
 │   ├── geoJsonParser.ts    # Parser spasial GeoJSON & validasi topologi cincin
 │   └── shapefileZipParser.ts # Ekstraksi arsip ZIP Shapefile (.shp, .shx, .dbf, .prj)
+├── utils/
+│   ├── formatDetector.ts   # Mesin identifikasi instan format: XML MDB, XML GMD, GeoJSON, JSON Katalog
+│   ├── checksum.ts         # Perhitungan SHA-256 Checksum integritas berkas
+│   └── spatialHelper.ts    # Normalisasi geometri dan koordinat pembatas BBox
 ├── components/
 │   ├── Header.tsx          # Navigasi utama dengan identitas ISO · SNI · MQI
 │   ├── DashboardView.tsx   # Dashboard status, KPI kelengkapan, & riwayat terkini
 │   ├── AuditResultsView.tsx # Tampilan hasil audit, diagnosis elemen, override, & ekspor
 │   ├── InventoryView.tsx   # Manajemen katalog inventaris & histori audit
-│   ├── UploadAuditView.tsx # Antarmuka unggah berkas metadata & data spasial
+│   ├── UploadAuditView.tsx # Antarmuka unggah berkas metadata & deteksi format instan
 │   └── BenchmarkExplorerModal.tsx # Penjelajah matriks 15 dataset sampel empiris
 └── data/
     ├── rules_v7.json       # Sumber acuan resmi aturan v7
@@ -83,3 +87,19 @@ npm run lint
 npm run build
 ```
 Semua perintah di atas dipastikan lolos tanpa peringatan atau kegagalan sintaks.
+
+---
+
+## 5. Mesin Identifikasi Format Metadata Instan
+
+KOMPAS mengimplementasikan mesin identifikasi format cerdas (`src/utils/formatDetector.ts`) yang bekerja secara *real-time* saat berkas dipilih:
+
+| Format Metadata | Simpul Akar (Root) | Namespace / Standar | Cakupan Audit KOMPAS |
+| :--- | :--- | :--- | :--- |
+| **XML MDB** | `<mdb:MD_Metadata>` | `http://standards.iso.org/iso/19115/-3/mdb/2.0` (ISO 19115-3:2021) | 26 Elemen Inti MQI + 6 Elemen Ekstensi E27–E32 (Aktif Penuh) |
+| **XML GMD** | `<gmd:MD_Metadata>` | `http://www.isotc211.org/2005/gmd` (ISO 19139 / SNI 19-19115) | 26 Elemen Inti MQI (E01–E26). Ekstensi E27–E32 berstatus N/A (Netral) |
+| **GeoJSON** | `FeatureCollection` / `Feature` | `urn:ogc:def:crs:OGC:1.3:CRS84` (IETF RFC 7946) | Audit koordinat BBox, hitungan fitur, integritas topologi, dan konsistensi |
+| **JSON Katalog** | `{ result: { ... } }` | CKAN `package_show` API / W3C DCAT-AP | 26 Elemen Inti MQI diekstrak dari atribut `extras`, `tags`, dan `resources` |
+| **XML Esri** | `<metadata>` | Format Ekspor ArcGIS Pro / ArcCatalog | Diurai otomatis ke 26 Elemen Inti MQI melalui pemetaan simpul `idinfo` |
+| **Shapefile ZIP** | Arsip ZIP Biner | Spesifikasi Teknis ESRI (.shp, .shx, .dbf, .prj) | Audit batas spasial, sistem koordinat PRJ, dan jumlah fitur spasial |
+
