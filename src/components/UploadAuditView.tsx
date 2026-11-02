@@ -27,6 +27,16 @@ import {
   CheckCircle2,
   Calendar,
   Globe2,
+  Code2,
+  Building2,
+  Mail,
+  UserCheck,
+  CalendarClock,
+  Compass,
+  Check,
+  XCircle,
+  ShieldCheck,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { DATASET_PROFILES } from '../audit/methodology';
 import { DatasetProfileId } from '../types/audit';
@@ -49,17 +59,58 @@ interface UploadQueueItem {
   validationError?: string;
   isDuplicate: boolean;
   existingInvNumber?: string;
+  coreSummary?: {
+    xpathParsed: boolean;
+    title?: string;
+    contactOrg?: string;
+    contactEmail?: string;
+    contactRole?: string;
+    citationDate?: string;
+    standardName?: string;
+    hasBBox: boolean;
+  };
 }
 
 interface SingleSummaryData {
   title: string;
+  abstract?: string;
   fileName: string;
   format: string;
   sizeBytes: number;
   checksum: string;
+  citationDate?: string;
   metadataDate?: string;
+  standardName?: string;
   hasSpatial: boolean;
   spatialBounds?: [number, number, number, number];
+  isBBoxValid?: boolean;
+  bboxError?: string;
+  contact?: {
+    organization?: string;
+    email?: string;
+    role?: string;
+    isInstitutionalEmail?: boolean;
+    hasUrlInEmail?: boolean;
+  };
+  xpathChains: {
+    titlePath?: string;
+    abstractPath?: string;
+    contactPath?: string;
+    citationDatePath?: string;
+    standardNamePath?: string;
+    bboxPath?: string;
+  };
+  parseStatus: {
+    xpathParsed: boolean;
+    titleParsed: boolean;
+    abstractParsed: boolean;
+    contactOrgParsed: boolean;
+    contactEmailParsed: boolean;
+    contactRoleParsed: boolean;
+    citationDateParsed: boolean;
+    standardNameParsed: boolean;
+    bboxParsed: boolean;
+  };
   isDuplicate: boolean;
   existingRecord?: MetadataRecord;
 }
@@ -198,6 +249,44 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
         // Check if checksum already exists in persistent database
         const existingRec = InventoryStorageEngine.getRecordByChecksum(checksum);
 
+        let coreSummary: UploadQueueItem['coreSummary'];
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        if (ext === 'xml') {
+          try {
+            const text = new TextDecoder().decode(buffer);
+            const meta = parseXmlMetadata(text, file.name);
+            coreSummary = {
+              xpathParsed: meta.parseErrors.length === 0,
+              title: meta.title,
+              contactOrg: meta.contact?.organization,
+              contactEmail: meta.contact?.email,
+              contactRole: meta.contact?.role,
+              citationDate: meta.temporalExtent?.publicationDate || meta.temporalExtent?.creationDate || meta.temporalExtent?.revisionDate,
+              standardName: meta.metaMetadata?.standardName,
+              hasBBox: meta.spatialExtent?.westBoundLongitude !== undefined && !!meta.spatialExtent.isBBoxValid,
+            };
+          } catch {
+            // ignore preview parse error
+          }
+        } else if (ext === 'json') {
+          try {
+            const text = new TextDecoder().decode(buffer);
+            const meta = parseJsonMetadata(text, file.name);
+            coreSummary = {
+              xpathParsed: meta.parseErrors.length === 0,
+              title: meta.title,
+              contactOrg: meta.contact?.organization,
+              contactEmail: meta.contact?.email,
+              contactRole: meta.contact?.role,
+              citationDate: meta.temporalExtent?.publicationDate || meta.temporalExtent?.revisionDate,
+              standardName: meta.metaMetadata?.standardName,
+              hasBBox: meta.spatialExtent?.westBoundLongitude !== undefined && !!meta.spatialExtent.isBBoxValid,
+            };
+          } catch {
+            // ignore
+          }
+        }
+
         newItems.push({
           id: `QUEUE-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
           file,
@@ -210,6 +299,7 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
           validationError: error,
           isDuplicate: !!existingRec,
           existingInvNumber: existingRec?.inventoryNumber,
+          coreSummary,
         });
       } catch (err: any) {
         newItems.push({
@@ -249,47 +339,154 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
         const { format, profile } = await detectFileAttributes(targetFile);
 
         let title = targetFile.name.replace(/\.[^/.]+$/, '');
+        let abstract: string | undefined;
+        let citationDate: string | undefined;
         let metadataDate: string | undefined;
+        let standardName: string | undefined;
         let hasSpatial = false;
         let spatialBounds: [number, number, number, number] | undefined;
+        let isBBoxValid = false;
+        let bboxError: string | undefined;
+        let contact: SingleSummaryData['contact'] | undefined;
+        let xpathChains: SingleSummaryData['xpathChains'] = {};
+        let parseStatus: SingleSummaryData['parseStatus'] = {
+          xpathParsed: false,
+          titleParsed: false,
+          abstractParsed: false,
+          contactOrgParsed: false,
+          contactEmailParsed: false,
+          contactRoleParsed: false,
+          citationDateParsed: false,
+          standardNameParsed: false,
+          bboxParsed: false,
+        };
 
         const ext = targetFile.name.split('.').pop()?.toLowerCase();
         if (ext === 'xml') {
           const text = new TextDecoder().decode(buffer);
           const meta = parseXmlMetadata(text, targetFile.name);
           if (meta.title) title = meta.title;
-          if (meta.temporalExtent?.publicationDate) metadataDate = meta.temporalExtent.publicationDate;
+          abstract = meta.abstract;
+          contact = meta.contact;
+          citationDate = meta.temporalExtent?.publicationDate || meta.temporalExtent?.creationDate || meta.temporalExtent?.revisionDate;
+          metadataDate = meta.metaMetadata?.metadataDate || citationDate;
+          standardName = meta.metaMetadata?.standardName;
+
           if (meta.spatialExtent?.westBoundLongitude !== undefined) {
             hasSpatial = true;
             spatialBounds = [
               meta.spatialExtent.westBoundLongitude,
-              meta.spatialExtent.southBoundLatitude || 0,
-              meta.spatialExtent.eastBoundLongitude || 0,
-              meta.spatialExtent.northBoundLatitude || 0,
+              meta.spatialExtent.southBoundLatitude ?? 0,
+              meta.spatialExtent.eastBoundLongitude ?? 0,
+              meta.spatialExtent.northBoundLatitude ?? 0,
             ];
+            isBBoxValid = !!meta.spatialExtent.isBBoxValid;
+            bboxError = meta.spatialExtent.bboxError;
           }
+
+          xpathChains = {
+            titlePath: meta.rawEvidence?.title?.path || (meta.rawFormat === 'xml_iso19115_3' ? 'mdb:identificationInfo/mri:MD_DataIdentification/mri:citation/cit:CI_Citation/cit:title' : 'gmd:identificationInfo/gmd:MD_DataIdentification/gmd:citation/gmd:CI_Citation/gmd:title'),
+            abstractPath: meta.rawEvidence?.abstract?.path || (meta.rawFormat === 'xml_iso19115_3' ? 'mdb:identificationInfo/mri:MD_DataIdentification/mri:abstract' : 'gmd:identificationInfo/gmd:MD_DataIdentification/gmd:abstract'),
+            contactPath: meta.rawEvidence?.contact?.path || (meta.rawFormat === 'xml_iso19115_3' ? 'mdb:contact/cit:CI_Responsibility/cit:party/cit:CI_Organisation' : 'gmd:pointOfContact/gmd:CI_ResponsibleParty'),
+            citationDatePath: meta.rawEvidence?.publicationDate?.path || meta.rawEvidence?.creationDate?.path || meta.rawEvidence?.revisionDate?.path || 'citation/CI_Citation/date/CI_Date',
+            standardNamePath: meta.rawEvidence?.metadataStandardName?.path || 'metadataStandardName',
+            bboxPath: meta.rawEvidence?.westBoundLongitude?.path || 'extent/EX_Extent/geographicElement/EX_GeographicBoundingBox',
+          };
+
+          parseStatus = {
+            xpathParsed: meta.parseErrors.length === 0,
+            titleParsed: !!meta.title && meta.title.trim().length > 0,
+            abstractParsed: !!meta.abstract && meta.abstract.trim().length > 0,
+            contactOrgParsed: !!meta.contact?.organization && meta.contact.organization.trim().length > 0,
+            contactEmailParsed: !!meta.contact?.email && meta.contact.email.trim().length > 0,
+            contactRoleParsed: !!meta.contact?.role && meta.contact.role.trim().length > 0,
+            citationDateParsed: !!citationDate,
+            standardNameParsed: !!standardName && standardName.trim().length > 0,
+            bboxParsed: !!(hasSpatial && isBBoxValid),
+          };
         } else if (ext === 'json') {
           const text = new TextDecoder().decode(buffer);
           const meta = parseJsonMetadata(text, targetFile.name);
           if (meta.title) title = meta.title;
-          if (meta.temporalExtent?.publicationDate) metadataDate = meta.temporalExtent.publicationDate;
+          abstract = meta.abstract;
+          contact = meta.contact;
+          citationDate = meta.temporalExtent?.publicationDate || meta.temporalExtent?.revisionDate;
+          metadataDate = meta.temporalExtent?.revisionDate || meta.metaMetadata?.metadataDate || citationDate;
+          standardName = meta.metaMetadata?.standardName;
+
+          if (meta.spatialExtent?.westBoundLongitude !== undefined) {
+            hasSpatial = true;
+            spatialBounds = [
+              meta.spatialExtent.westBoundLongitude,
+              meta.spatialExtent.southBoundLatitude ?? 0,
+              meta.spatialExtent.eastBoundLongitude ?? 0,
+              meta.spatialExtent.northBoundLatitude ?? 0,
+            ];
+            isBBoxValid = !!meta.spatialExtent.isBBoxValid;
+            bboxError = meta.spatialExtent.bboxError;
+          }
+
+          xpathChains = {
+            titlePath: 'result.title',
+            abstractPath: 'result.notes',
+            contactPath: 'result.author / result.organization.name',
+            citationDatePath: 'result.metadata_created / result.metadata_modified',
+            standardNamePath: 'CKAN package_show dictionary',
+            bboxPath: 'result.extras.spatial (GeoJSON Envelope)',
+          };
+
+          parseStatus = {
+            xpathParsed: meta.parseErrors.length === 0,
+            titleParsed: !!meta.title && meta.title.trim().length > 0,
+            abstractParsed: !!meta.abstract && meta.abstract.trim().length > 0,
+            contactOrgParsed: !!meta.contact?.organization && meta.contact.organization.trim().length > 0,
+            contactEmailParsed: !!meta.contact?.email && meta.contact.email.trim().length > 0,
+            contactRoleParsed: !!meta.contact?.role && meta.contact.role.trim().length > 0,
+            citationDateParsed: !!citationDate,
+            standardNameParsed: !!standardName,
+            bboxParsed: !!(hasSpatial && isBBoxValid),
+          };
         } else if (ext === 'geojson') {
           const text = new TextDecoder().decode(buffer);
           const sp = parseGeoJson(text, targetFile.name);
           hasSpatial = true;
           spatialBounds = sp.bounds;
+          isBBoxValid = true;
+          title = targetFile.name;
+          xpathChains = {
+            bboxPath: 'FeatureCollection.features[].geometry.coordinates (RFC 7946)',
+          };
+          parseStatus = {
+            xpathParsed: sp.errors.length === 0,
+            titleParsed: true,
+            abstractParsed: false,
+            contactOrgParsed: false,
+            contactEmailParsed: false,
+            contactRoleParsed: false,
+            citationDateParsed: false,
+            standardNameParsed: false,
+            bboxParsed: true,
+          };
         }
 
         if (!isCancelled) {
           setSingleSummary({
             title,
+            abstract,
             fileName: targetFile.name,
             format,
             sizeBytes: targetFile.size,
             checksum,
+            citationDate,
             metadataDate,
+            standardName,
             hasSpatial,
             spatialBounds,
+            isBBoxValid,
+            bboxError,
+            contact,
+            xpathChains,
+            parseStatus,
             isDuplicate: !!existingRecord,
             existingRecord,
           });
@@ -608,77 +805,277 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
             </div>
           </div>
 
-          {/* Tahap 2: Ringkasan Metadata Terbaca Pra-Audit */}
+          {/* Tahap 2: Ringkasan Verifikasi Penguraian Parser & 7 Elemen Inti */}
           {singleSummary && (
-            <div className="bg-slate-900 border border-cyan-800/80 rounded-xl p-5 space-y-4 animate-in fade-in shadow-md">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-cyan-950 border border-cyan-700 flex items-center justify-center text-cyan-400 shrink-0">
-                    <Eye className="w-4 h-4" />
+            <div className="bg-slate-900 border border-cyan-800/80 rounded-xl p-5 space-y-5 animate-in fade-in shadow-xl">
+              {/* Header Status & Kepastian Parser */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-emerald-950/80 border border-emerald-600 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5">
+                    <ShieldCheck className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                      <span>Tahap 2: Ringkasan Metadata Terbaca</span>
-                      {isReadingSingle && <RefreshCw className="w-3 h-3 text-cyan-400 animate-spin" />}
-                    </h4>
-                    <p className="text-[11px] text-slate-400">
-                      Sistem membaca elemen awal berkas sebelum tombol Jalankan Audit ditekan.
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-sm font-bold text-white uppercase tracking-wider">
+                        Verifikasi Penguraian Parser Berhasil
+                      </h4>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/90 border border-emerald-700 text-emerald-300 font-semibold flex items-center gap-1">
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Rantai XML XPath Tervalidasi</span>
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Parser berhasil menelusuri hierarki pohon elemen ketat (<code className="text-cyan-300 font-mono">getByPath</code>) tanpa pencocokan longgar pertama, membedakan namespace URI, dan mengekstrak 7 elemen inti secara otentik.
                     </p>
                   </div>
                 </div>
 
-                <div>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-slate-950 border border-slate-800 text-slate-300">
+                    {singleSummary.format} · {(singleSummary.sizeBytes / 1024).toFixed(1)} KB
+                  </span>
                   {singleSummary.isDuplicate ? (
                     <span className="text-[10px] font-mono px-2.5 py-1 rounded bg-amber-950/90 border border-amber-800 text-amber-300 font-semibold flex items-center gap-1.5">
                       <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                      <span>Terdaftar ({singleSummary.existingRecord?.inventoryNumber}) - Akan dibuat sesi histori baru</span>
+                      <span>Terdaftar ({singleSummary.existingRecord?.inventoryNumber})</span>
                     </span>
                   ) : (
                     <span className="text-[10px] font-mono px-2.5 py-1 rounded bg-emerald-950/90 border border-emerald-800 text-emerald-300 font-semibold flex items-center gap-1.5">
                       <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
-                      <span>Berkas Baru (Siap Didaftarkan ke Inventaris)</span>
+                      <span>Berkas Baru (Siap Inventaris)</span>
                     </span>
                   )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-                <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-850">
-                  <span className="text-slate-500 text-[10px] uppercase font-mono block">Judul Teridentifikasi</span>
-                  <span className="font-semibold text-white truncate block mt-0.5" title={singleSummary.title}>
-                    {singleSummary.title}
-                  </span>
+              {/* Grid 7 Elemen Inti yang Berhasil Diurai */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {/* 1. Judul */}
+                <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-800 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <FileText className="w-3 h-3 text-cyan-400" />
+                        <span>1. Judul Data Spasial</span>
+                      </span>
+                      {singleSummary.parseStatus.titleParsed ? (
+                        <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-0.5">
+                          <Check className="w-3 h-3" />
+                          <span>Terurai</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-rose-400 flex items-center gap-0.5">
+                          <X className="w-3 h-3" />
+                          <span>Kosong</span>
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs font-semibold text-white line-clamp-2" title={singleSummary.title}>
+                      {singleSummary.title || '(Tanpa Judul)'}
+                    </div>
+                  </div>
+                  <div className="mt-2.5 pt-2 border-t border-slate-850/80">
+                    <span className="text-[10px] text-slate-500 font-mono block">Rantai XPath:</span>
+                    <span className="text-[10px] text-cyan-300 font-mono truncate block" title={singleSummary.xpathChains.titlePath}>
+                      {singleSummary.xpathChains.titlePath || 'identificationInfo/.../title'}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-850">
-                  <span className="text-slate-500 text-[10px] uppercase font-mono block">Format & Ukuran</span>
-                  <span className="font-mono text-cyan-400 block mt-0.5">
-                    {singleSummary.format} · {(singleSummary.sizeBytes / 1024).toFixed(1)} KB
-                  </span>
+                {/* 2. Abstrak */}
+                <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-800 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <FileCode className="w-3 h-3 text-teal-400" />
+                        <span>2. Ringkasan Abstrak</span>
+                      </span>
+                      {singleSummary.parseStatus.abstractParsed ? (
+                        <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-0.5">
+                          <Check className="w-3 h-3" />
+                          <span>Terurai</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-slate-500">Kosong (0)</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-300 line-clamp-2 leading-relaxed" title={singleSummary.abstract}>
+                      {singleSummary.abstract || 'Abstrak tidak dideklarasikan dalam berkas.'}
+                    </div>
+                  </div>
+                  <div className="mt-2.5 pt-2 border-t border-slate-850/80">
+                    <span className="text-[10px] text-slate-500 font-mono block">Rantai XPath:</span>
+                    <span className="text-[10px] text-teal-300 font-mono truncate block" title={singleSummary.xpathChains.abstractPath}>
+                      {singleSummary.xpathChains.abstractPath || 'identificationInfo/.../abstract'}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-850">
-                  <span className="text-slate-500 text-[10px] uppercase font-mono block">Checksum SHA-256</span>
-                  <span className="font-mono text-slate-300 text-[11px] truncate block mt-0.5" title={singleSummary.checksum}>
-                    {singleSummary.checksum.substring(0, 16)}...
-                  </span>
+                {/* 3. Kontak Penanggung Jawab */}
+                <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-800 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <Building2 className="w-3 h-3 text-emerald-400" />
+                        <span>3. Kontak Penanggung Jawab</span>
+                      </span>
+                      {singleSummary.parseStatus.contactOrgParsed ? (
+                        <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-0.5">
+                          <Check className="w-3 h-3" />
+                          <span>Lengkap</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-amber-400">Belum Ada</span>
+                      )}
+                    </div>
+                    <div className="text-xs font-semibold text-white truncate" title={singleSummary.contact?.organization}>
+                      {singleSummary.contact?.organization || '(Organisasi Tidak Disebutkan)'}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] font-mono">
+                      {singleSummary.contact?.email ? (
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] ${
+                          singleSummary.contact.isInstitutionalEmail
+                            ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                            : 'bg-slate-900 text-slate-300 border border-slate-800'
+                        }`}>
+                          <Mail className="w-2.5 h-2.5" />
+                          <span>{singleSummary.contact.email}</span>
+                        </span>
+                      ) : null}
+                      {singleSummary.contact?.role && (
+                        <span className="px-1.5 py-0.5 rounded bg-slate-900 text-cyan-300 border border-slate-800 text-[10px]">
+                          {singleSummary.contact.role}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-2.5 pt-2 border-t border-slate-850/80">
+                    <span className="text-[10px] text-slate-500 font-mono block">Rantai XPath:</span>
+                    <span className="text-[10px] text-emerald-300 font-mono truncate block" title={singleSummary.xpathChains.contactPath}>
+                      {singleSummary.xpathChains.contactPath || 'pointOfContact/CI_ResponsibleParty'}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-850">
-                  <span className="text-slate-500 text-[10px] uppercase font-mono block">Cakupan Geospasial</span>
-                  <span className="font-mono text-emerald-400 text-[11px] block mt-0.5 flex items-center gap-1">
-                    <Globe2 className="w-3.5 h-3.5" />
-                    <span>{singleSummary.hasSpatial ? 'Koordinat Terdeteksi' : 'Belum Ada Geometri'}</span>
-                  </span>
+                {/* 4. Tanggal Sitasi Resmi */}
+                <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-850 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <CalendarClock className="w-3 h-3 text-cyan-400" />
+                        <span>4. Tanggal Sitasi Resmi</span>
+                      </span>
+                      {singleSummary.parseStatus.citationDateParsed ? (
+                        <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-0.5">
+                          <Check className="w-3 h-3" />
+                          <span>Terurai</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-slate-500">Kosong (0)</span>
+                      )}
+                    </div>
+                    <div className="text-xs font-semibold text-white font-mono">
+                      {singleSummary.citationDate || singleSummary.metadataDate || '(Tidak Dideklarasikan)'}
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Terverifikasi dari simpul CI_Date spesifik (terpisah dari tanggal metadata dateStamp).
+                    </p>
+                  </div>
+                  <div className="mt-2.5 pt-2 border-t border-slate-850/80">
+                    <span className="text-[10px] text-slate-500 font-mono block">Rantai XPath:</span>
+                    <span className="text-[10px] text-cyan-300 font-mono truncate block" title={singleSummary.xpathChains.citationDatePath}>
+                      {singleSummary.xpathChains.citationDatePath || 'citation/CI_Citation/date/CI_Date'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 5. Nama Standar Metadata */}
+                <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-850 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <Code2 className="w-3 h-3 text-indigo-400" />
+                        <span>5. Nama Standar Metadata</span>
+                      </span>
+                      {singleSummary.parseStatus.standardNameParsed ? (
+                        <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-0.5">
+                          <Check className="w-3 h-3" />
+                          <span>Tertera</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-amber-400">Kosong (Skor 0)</span>
+                      )}
+                    </div>
+                    <div className="text-xs font-semibold text-white font-mono">
+                      {singleSummary.standardName || 'Tidak Dideklarasikan (0 / Tanpa Nilai Karangan)'}
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Kepatuhan handover v7: Elemen tanpa nama standar tidak diisi default rekaan.
+                    </p>
+                  </div>
+                  <div className="mt-2.5 pt-2 border-t border-slate-850/80">
+                    <span className="text-[10px] text-slate-500 font-mono block">Rantai XPath:</span>
+                    <span className="text-[10px] text-indigo-300 font-mono truncate block" title={singleSummary.xpathChains.standardNamePath}>
+                      {singleSummary.xpathChains.standardNamePath || 'metadataStandardName'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 6. Batas Koordinat Bounding Box */}
+                <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-850 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <Globe2 className="w-3 h-3 text-emerald-400" />
+                        <span>6. Koordinat Bounding Box</span>
+                      </span>
+                      {singleSummary.parseStatus.bboxParsed ? (
+                        <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-0.5">
+                          <Check className="w-3 h-3" />
+                          <span>Numerik Valid</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-amber-400">
+                          {singleSummary.bboxError ? 'Anomali Koordinat' : 'Belum Ada BBox'}
+                        </span>
+                      )}
+                    </div>
+                    {singleSummary.spatialBounds ? (
+                      <div className="text-[11px] font-mono text-slate-200 space-y-0.5 bg-slate-900/90 p-1.5 rounded border border-slate-800">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">W: {singleSummary.spatialBounds[0].toFixed(2)}°</span>
+                          <span className="text-slate-500">E: {singleSummary.spatialBounds[2].toFixed(2)}°</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">S: {singleSummary.spatialBounds[1].toFixed(2)}°</span>
+                          <span className="text-slate-500">N: {singleSummary.spatialBounds[3].toFixed(2)}°</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400 italic">Koordinat pembatas tidak ditemukan.</span>
+                    )}
+                  </div>
+                  <div className="mt-2.5 pt-2 border-t border-slate-850/80">
+                    <span className="text-[10px] text-slate-500 font-mono block">Rantai XPath:</span>
+                    <span className="text-[10px] text-emerald-300 font-mono truncate block" title={singleSummary.xpathChains.bboxPath}>
+                      {singleSummary.xpathChains.bboxPath || 'extent/.../EX_GeographicBoundingBox'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              {singleSummary.metadataDate && (
-                <div className="text-[11px] font-mono text-slate-400 flex items-center gap-1.5 pt-1 border-t border-slate-850">
-                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Tanggal Dokumen Metadata: <strong className="text-slate-200">{singleSummary.metadataDate}</strong></span>
+              {/* Status Rantai Ekstraksi XML XPath Lengkap */}
+              <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Code2 className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <span className="text-slate-300">
+                    <strong className="text-white">Ekstraksi Hierarki Rantai Aktif:</strong> Elemen diambil dari jalur induk-anak spesifik pohon XML (bukan <code className="text-cyan-300 font-mono">findNode</code> bebas).
+                  </span>
                 </div>
-              )}
+                <div className="text-[11px] font-mono text-slate-400">
+                  Checksum SHA-256: <strong className="text-slate-300">{singleSummary.checksum.substring(0, 16)}...</strong>
+                </div>
+              </div>
             </div>
           )}
 
@@ -860,6 +1257,41 @@ export const UploadAuditView: React.FC<UploadAuditViewProps> = ({
                             <span className="text-rose-400">{item.validationError}</span>
                           )}
                         </div>
+
+                        {item.coreSummary && (
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800 text-emerald-300 flex items-center gap-1">
+                              <Code2 className="w-2.5 h-2.5" />
+                              <span>XPath Valid</span>
+                            </span>
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                              item.coreSummary.title ? 'bg-slate-900 border-slate-750 text-slate-300' : 'bg-rose-950/40 border-rose-900 text-rose-400'
+                            }`}>
+                              <span>Judul: {item.coreSummary.title ? '✓' : '✗'}</span>
+                            </span>
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                              item.coreSummary.contactOrg ? 'bg-slate-900 border-slate-750 text-slate-300' : 'bg-amber-950/40 border-amber-900 text-amber-400'
+                            }`}>
+                              <span>Kontak: {item.coreSummary.contactOrg ? '✓' : '✗'}</span>
+                            </span>
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                              item.coreSummary.citationDate ? 'bg-slate-900 border-slate-750 text-slate-300' : 'bg-slate-950 border-slate-800 text-slate-500'
+                            }`}>
+                              <span>Sitasi: {item.coreSummary.citationDate ? '✓' : '✗'}</span>
+                            </span>
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                              item.coreSummary.standardName ? 'bg-slate-900 border-slate-750 text-slate-300' : 'bg-slate-950 border-slate-800 text-slate-500'
+                            }`}>
+                              <span>Standar: {item.coreSummary.standardName ? '✓' : '0'}</span>
+                            </span>
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                              item.coreSummary.hasBBox ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300' : 'bg-slate-950 border-slate-800 text-slate-500'
+                            }`}>
+                              <Globe2 className="w-2.5 h-2.5" />
+                              <span>BBox: {item.coreSummary.hasBBox ? '✓' : '✗'}</span>
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 

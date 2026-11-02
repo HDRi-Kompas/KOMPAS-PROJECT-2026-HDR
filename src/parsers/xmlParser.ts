@@ -95,6 +95,11 @@ function getFirstByPath(root: any, pathSteps: (string | string[])[]): any | unde
   return matches.length > 0 ? extractLeafValue(matches[0]) : undefined;
 }
 
+function getFirstNodeByPath(root: any, pathSteps: (string | string[])[]): any | undefined {
+  const matches = getByPath(root, pathSteps);
+  return matches.length > 0 ? matches[0] : undefined;
+}
+
 export function parseXmlMetadata(xmlString: string, fileName = 'metadata.xml'): NormalizedMetadata {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -435,7 +440,7 @@ export function parseXmlMetadata(xmlString: string, fileName = 'metadata.xml'): 
   rawEvidence.useConstraints = { value: limitations.join('; '), path: 'resourceConstraints', isPlaceholder: isPlaceholderValue(limitations.join(' ')) };
 
   // 12. Feature Catalogue / Attributes (E12, E31)
-  const featCatDesc = getFirstByPath(root, ['contentInfo', 'MD_FeatureCatalogueDescription']);
+  const featCatDesc = getFirstNodeByPath(root, ['contentInfo', 'MD_FeatureCatalogueDescription']);
   let featureCatFound = !!featCatDesc;
   let featureCatTitle: string | undefined;
   let e31ComplianceCode: boolean | undefined;
@@ -516,10 +521,10 @@ export function parseXmlMetadata(xmlString: string, fileName = 'metadata.xml'): 
       }
     }
   } else if (isEsri) {
-    const esriBounding = getFirstByPath(root, ['idinfo', 'spdom', 'bounding']) ||
-      getFirstByPath(root, ['metadata', 'idinfo', 'spdom', 'bounding']) ||
-      getFirstByPath(root, ['dataIdInfo', 'dataExt', 'geoEle', 'GeoBndBox']) ||
-      getFirstByPath(root, ['metadata', 'dataIdInfo', 'dataExt', 'geoEle', 'GeoBndBox']);
+    const esriBounding = getFirstNodeByPath(root, ['idinfo', 'spdom', 'bounding']) ||
+      getFirstNodeByPath(root, ['metadata', 'idinfo', 'spdom', 'bounding']) ||
+      getFirstNodeByPath(root, ['dataIdInfo', 'dataExt', 'geoEle', 'GeoBndBox']) ||
+      getFirstNodeByPath(root, ['metadata', 'dataIdInfo', 'dataExt', 'geoEle', 'GeoBndBox']);
     if (esriBounding) {
       const w = parseFloat(extractLeafValue(esriBounding.westbc || esriBounding.westBL) || '');
       const e = parseFloat(extractLeafValue(esriBounding.eastbc || esriBounding.eastBL) || '');
@@ -547,7 +552,7 @@ export function parseXmlMetadata(xmlString: string, fileName = 'metadata.xml'): 
   rawEvidence.northBoundLatitude = { value: north, path: 'extent/EX_GeographicBoundingBox/northBoundLatitude', isPlaceholder: false };
 
   // 14. Temporal Extent (E14)
-  const tempExtentNode = getFirstByPath(root, [
+  const tempExtentNode = getFirstNodeByPath(root, [
     'identificationInfo',
     ['MD_DataIdentification', 'SV_ServiceIdentification'],
     'extent',
